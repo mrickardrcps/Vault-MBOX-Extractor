@@ -1,0 +1,15 @@
+# Ignore PyInstaller compilation artifacts
+build/
+dist/
+*.spec
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore extracted eDiscovery data
+extracted_emails/
+*.mbox
+
+# STRICT SECURITY GUARDRAIL: Exclude internal documentation
+RCPS Networking*
