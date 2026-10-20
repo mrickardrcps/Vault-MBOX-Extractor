@@ -15,14 +15,14 @@ def sanitize_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", str(name))[:100]
 
 def select_folder():
-    folder_path = filedialog.askdirectory(title="Please select the folder containing your .mbox files")
+    folder_path = filedialog.askdirectory(title="Select folder containing .mbox files")
     
     if not folder_path:
         return
         
     mbox_files = glob.glob(os.path.join(folder_path, "*.mbox"))
     if not mbox_files:
-        messagebox.showerror("Error", f"No .mbox files were found in:\n{folder_path}")
+        messagebox.showerror("Error", f"No .mbox files found in:\n{folder_path}")
         return
         
     btn_browse.config(state=tk.DISABLED)
@@ -102,33 +102,39 @@ def process_files(export_path, mbox_files):
             
             attach_block = f"<div style='margin-top:10px;'><strong>Attachments:</strong><br>{attachments_html}</div>" if attachments_html else ""
             
-            # The print button is now embedded directly inside the email iframe to bypass browser security restrictions
+            # Header block without the injected JS autoprint, as we are using batch compilation
             header_block = f"""
-            <div style="background:#f1f3f4; padding:15px; border-bottom:1px solid #dadce0; font-family:Arial; margin-bottom:20px; position:relative;">
-                <button onclick="window.print()" style="position:absolute; right:15px; top:15px; padding:8px 16px; background-color:#1a73e8; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold;">Print / Save as PDF</button>
-                <p style="margin:0 0 5px 0; max-width:80%;"><strong>From:</strong> {sender}</p>
-                <p style="margin:0 0 5px 0; max-width:80%;"><strong>Subject:</strong> {subject}</p>
+            <div style="background:#f1f3f4; padding:15px; border-bottom:1px solid #dadce0; font-family:Arial; margin-bottom:20px;">
+                <p style="margin:0 0 5px 0;"><strong>From:</strong> {sender}</p>
+                <p style="margin:0 0 5px 0;"><strong>Subject:</strong> {subject}</p>
                 <p style="margin:0;"><strong>Date:</strong> {date}</p>
                 {attach_block}
             </div>
             """
             
+            full_email_content = header_block + final_html
+
+            # Write standalone file for individual viewing
             with open(full_path, "w", encoding="utf-8", errors="ignore") as f:
-                f.write(header_block + final_html)
+                f.write(f"""<button onclick="window.print()" style="position:fixed; right:15px; top:15px; padding:8px 16px; background-color:#1a73e8; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold; z-index:1000;">Print / Save as PDF</button>""" + full_email_content)
             
             clean_text = " ".join(clean_text.split())
+            
+            # Inject full HTML payload into search data for in-memory batching
             search_data.append({
                 "id": email_counter,
                 "name": subject,
                 "sender": sender,
                 "path": relative_path,
-                "content": clean_text
+                "content": clean_text,
+                "html_payload": full_email_content
             })
             
-            # Replaced the anchor tag with an onclick handler for persistent styling
             list_items.append(
-                f"<li onclick=\"loadEmail('{relative_path}', this)\"><strong>{subject}</strong>"
-                f"<span class='dir'>{sender}<br>{date}</span></li>"
+                f"<li class='email-item' onclick=\"loadEmail('{relative_path}', this)\">"
+                f"<input type='checkbox' class='print-cb' data-id='{email_counter}' onclick='event.stopPropagation();' style='float:left; margin-right:10px;'>"
+                f"<strong>{subject}</strong>"
+                f"<span class='dir'>{sender}<br>{date}</span><div style='clear:both;'></div></li>"
             )
             
             email_counter += 1
@@ -144,22 +150,29 @@ def process_files(export_path, mbox_files):
             body {{ font-family: Arial, sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; color: #202124; background-color: #f8f9fa; }}
             #sidebar {{ width: 35%; padding: 20px; overflow-y: auto; background-color: #ffffff; border-right: 1px solid #dadce0; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 10; }}
             #viewer-container {{ width: 65%; display: flex; flex-direction: column; background-color: #f1f3f4; }}
+            #controls {{ padding: 12px 20px; background-color: #f1f3f4; border-bottom: 1px solid #dadce0; text-align: right; }}
+            button {{ padding: 8px 16px; background-color: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; margin-left: 10px; }}
+            button:hover {{ background-color: #1557b0; }}
             iframe {{ flex-grow: 1; border: none; width: 100%; height: 100%; background-color: #ffffff; }}
             h2 {{ color: #1a73e8; margin-top: 0; margin-bottom: 15px; font-size: 18px; }}
             #searchInput {{ width: 100%; padding: 10px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px; }}
-            #searchInput:focus {{ border-color: #1a73e8; outline: none; box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }}
             ul {{ list-style-type: none; padding-left: 0; margin: 0; }}
             li {{ padding: 10px; background: #ffffff; margin-bottom: 6px; border-radius: 6px; border: 1px solid #e0e0e0; font-size: 13px; cursor: pointer; transition: background-color 0.2s, border-color 0.2s; }}
             li:hover {{ background-color: #e8f0fe; border-color: #d2e3fc; }}
             .dir {{ color: #5f6368; font-size: 0.85em; margin-top: 4px; display: block; word-break: break-all; }}
-            strong {{ word-break: break-all; }}
+            .bulk-controls {{ margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #dadce0; display: flex; justify-content: space-between; align-items: center; }}
         </style>
     </head>
     <body>
         <div id="sidebar">
             <h2>Legal MBOX Export Index</h2>
             <input type="text" id="searchInput" onkeyup="filterList()" placeholder="Search subjects, senders, or body content...">
-            <div style="font-size: 12px; color: #5f6368; margin-bottom: 15px;" id="fileCount">Showing {email_counter} emails</div>
+            <div class="bulk-controls">
+                <div>
+                    <input type="checkbox" id="selectAll" onclick="toggleSelectAll()"> <label for="selectAll" style="font-size:13px; font-weight:bold;">Select All Visible</label>
+                </div>
+                <div style="font-size: 12px; color: #5f6368;" id="fileCount">Showing {email_counter} emails</div>
+            </div>
             <ul id="fileList">
     """
 
@@ -167,6 +180,9 @@ def process_files(export_path, mbox_files):
             </ul>
         </div>
         <div id="viewer-container">
+            <div id="controls">
+                <button onclick="compileAndPrint()">Compile Selected to PDF / Print</button>
+            </div>
             <iframe name="viewer" id="viewer" src="about:blank"></iframe>
         </div>
         <script>
@@ -174,16 +190,11 @@ def process_files(export_path, mbox_files):
             let selectedLi = null;
             
             function loadEmail(url, liElement) {{
-                // Update iframe source
                 document.getElementById('viewer').src = url;
-                
-                // Clear the previously selected item's styling
                 if (selectedLi) {{
                     selectedLi.style.backgroundColor = "#ffffff";
                     selectedLi.style.borderColor = "#e0e0e0";
                 }}
-                
-                // Apply active styling to the clicked item
                 liElement.style.backgroundColor = "#e8f0fe";
                 liElement.style.borderColor = "#1a73e8";
                 selectedLi = liElement;
@@ -206,9 +217,59 @@ def process_files(export_path, mbox_files):
                         visibleCount++;
                     }} else {{
                         items[i].style.display = "none";
+                        const cb = items[i].querySelector('.print-cb');
+                        if(cb) cb.checked = false;
                     }}
                 }}
                 document.getElementById('fileCount').innerText = "Showing " + visibleCount + " emails";
+                document.getElementById('selectAll').checked = false;
+            }}
+
+            function toggleSelectAll() {{
+                const isChecked = document.getElementById('selectAll').checked;
+                const items = document.querySelectorAll('.email-item');
+                items.forEach(item => {{
+                    if (item.style.display !== "none") {{
+                        const cb = item.querySelector('.print-cb');
+                        if (cb) cb.checked = isChecked;
+                    }}
+                }});
+            }}
+
+            function compileAndPrint() {{
+                const checkboxes = document.querySelectorAll('.print-cb:checked');
+                if (checkboxes.length === 0) {{
+                    alert("Please select at least one email.");
+                    return;
+                }}
+
+                // Generate a single HTML document combining all selected emails
+                let compiledHTML = "<!DOCTYPE html><html><head><title>Batch Export</title>";
+                compiledHTML += "<style>@media print {{ .page-break {{ page-break-after: always; }} }}</style>";
+                compiledHTML += "</head><body style='font-family: Arial, sans-serif;'>";
+
+                checkboxes.forEach(cb => {{
+                    const id = parseInt(cb.dataset.id);
+                    const emailData = searchData.find(e => e.id === id);
+                    if (emailData) {{
+                        compiledHTML += emailData.html_payload;
+                        compiledHTML += "<div class='page-break' style='border-bottom: 2px dashed #ccc; margin: 30px 0;'></div>";
+                    }}
+                }});
+
+                compiledHTML += "</body></html>";
+
+                // Open a new browser window/tab and write the compiled document
+                const printWindow = window.open('', '_blank');
+                printWindow.document.open();
+                printWindow.document.write(compiledHTML);
+                printWindow.document.close();
+                printWindow.focus();
+
+                // Trigger the print dialog after a brief delay to allow rendering
+                setTimeout(() => {{
+                    printWindow.print();
+                }}, 750);
             }}
         </script>
     </body>
@@ -225,11 +286,7 @@ def process_files(export_path, mbox_files):
 def completion_callback(index_path):
     progress.stop()
     lbl_status.config(text="Opening Master Index...")
-    
-    # Launch the index automatically in the default web browser
     webbrowser.open(f"file:///{index_path.replace(os.sep, '/')}")
-    
-    # Exit the Python GUI silently
     root.after(1000, sys.exit)
 
 def on_closing():
@@ -241,7 +298,7 @@ root.geometry("450x220")
 root.eval('tk::PlaceWindow . center')
 root.protocol("WM_DELETE_WINDOW", on_closing)
 
-lbl_instruction = tk.Label(root, text="Please select the folder containing your .mbox files.\nAll emails and attachments will be extracted into a searchable format.", wraplength=400, font=("Arial", 10))
+lbl_instruction = tk.Label(root, text="Select the folder containing your .mbox files.\nEmails will be indexed for bulk HTML compilation and PDF exporting.", wraplength=400, font=("Arial", 10))
 lbl_instruction.pack(pady=20)
 
 btn_browse = tk.Button(root, text="Browse...", command=select_folder, width=15, font=("Arial", 10, "bold"))
