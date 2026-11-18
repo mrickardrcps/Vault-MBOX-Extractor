@@ -12,7 +12,16 @@ from email import policy
 from email.parser import BytesParser
 
 def sanitize_filename(name):
-    return re.sub(r'[\\/*?:"<>|]', "", str(name))[:100]
+    # 1. Replace tabs, newlines, and other control characters (\x00-\x1f and \x7f) with a space
+    clean_name = re.sub(r'[\x00-\x1f\x7f]', ' ', str(name))
+    
+    # 2. Remove invalid Windows file path characters
+    clean_name = re.sub(r'[\\/*?:"<>|]', "", clean_name)
+    
+    # 3. Collapse multiple spaces into a single space, strip edges, and truncate to 100 characters
+    clean_name = " ".join(clean_name.split())
+    
+    return clean_name[:100].strip()
 
 def select_folder():
     folder_path = filedialog.askdirectory(title="Select folder containing .mbox files")
@@ -102,7 +111,6 @@ def process_files(export_path, mbox_files):
             
             attach_block = f"<div style='margin-top:10px;'><strong>Attachments:</strong><br>{attachments_html}</div>" if attachments_html else ""
             
-            # Header block without the injected JS autoprint, as we are using batch compilation
             header_block = f"""
             <div style="background:#f1f3f4; padding:15px; border-bottom:1px solid #dadce0; font-family:Arial; margin-bottom:20px;">
                 <p style="margin:0 0 5px 0;"><strong>From:</strong> {sender}</p>
@@ -114,13 +122,11 @@ def process_files(export_path, mbox_files):
             
             full_email_content = header_block + final_html
 
-            # Write standalone file for individual viewing
             with open(full_path, "w", encoding="utf-8", errors="ignore") as f:
                 f.write(f"""<button onclick="window.print()" style="position:fixed; right:15px; top:15px; padding:8px 16px; background-color:#1a73e8; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold; z-index:1000;">Print / Save as PDF</button>""" + full_email_content)
             
             clean_text = " ".join(clean_text.split())
             
-            # Inject full HTML payload into search data for in-memory batching
             search_data.append({
                 "id": email_counter,
                 "name": subject,
@@ -243,7 +249,6 @@ def process_files(export_path, mbox_files):
                     return;
                 }}
 
-                // Generate a single HTML document combining all selected emails
                 let compiledHTML = "<!DOCTYPE html><html><head><title>Batch Export</title>";
                 compiledHTML += "<style>@media print {{ .page-break {{ page-break-after: always; }} }}</style>";
                 compiledHTML += "</head><body style='font-family: Arial, sans-serif;'>";
@@ -259,14 +264,12 @@ def process_files(export_path, mbox_files):
 
                 compiledHTML += "</body></html>";
 
-                // Open a new browser window/tab and write the compiled document
                 const printWindow = window.open('', '_blank');
                 printWindow.document.open();
                 printWindow.document.write(compiledHTML);
                 printWindow.document.close();
                 printWindow.focus();
 
-                // Trigger the print dialog after a brief delay to allow rendering
                 setTimeout(() => {{
                     printWindow.print();
                 }}, 750);
